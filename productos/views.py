@@ -15,7 +15,7 @@ class ProductoViewSet(viewsets.ModelViewSet):
 class CrearPagoView(APIView):
     def post(self, request):
         # ✅ Tu Access Token de prueba (correcto)
-        ACCESS_TOKEN = "APP_USR-7625926285656694-021313-90a391267e370242916091dce9515e6b-3202479730"
+        ACCESS_TOKEN = "APP_USR-3981250444573359-021718-b008900282be672295f585d88ec1da0e-3209594063"
         
         sdk = mercadopago.SDK(ACCESS_TOKEN)
 
