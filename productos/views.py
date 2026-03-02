@@ -5,7 +5,7 @@ from rest_framework.response import Response
 from .models import Producto
 from .serializers import ProductoSerializer
 
-# --- PARTE 1: ViewSet para listar productos ---
+# --- PARTE 1: ViewSet para listar productos (Mantenido por compatibilidad) ---
 class ProductoViewSet(viewsets.ModelViewSet):
     queryset = Producto.objects.all()
     serializer_class = ProductoSerializer
@@ -14,45 +14,37 @@ class ProductoViewSet(viewsets.ModelViewSet):
 # --- PARTE 2: Vista para crear preferencia de pago con Mercado Pago ---
 class CrearPagoView(APIView):
     def post(self, request):
-        # ✅ Tu Access Token de prueba (correcto)
+        # Access Token de prueba
         ACCESS_TOKEN = "APP_USR-3981250444573359-021718-b008900282be672295f585d88ec1da0e-3209594063"
-        
         sdk = mercadopago.SDK(ACCESS_TOKEN)
 
         try:
-            # Obtener el ID del producto desde la petición
-            producto_id = request.data.get('id')
+            # 1. Extraemos los datos que vienen de Supabase/Angular
+            titulo = request.data.get('titulo')
+            precio = request.data.get('precio')
             
-            # 🔍 DEBUGGING: Ver qué datos llegan
-            print(f"📦 Datos recibidos: {request.data}")
-            print(f"🆔 ID del producto: {producto_id}")
+            # Limpieza de datos básica para evitar errores de tipo
+            if titulo:
+                titulo = str(titulo).strip()
             
-            # Validar que llegó el ID
-            if not producto_id:
-                print("❌ ERROR: No se proporcionó el ID del producto")
-                return Response(
-                    {'error': 'No se proporcionó el ID del producto'}, 
-                    status=status.HTTP_400_BAD_REQUEST
-                )
-            
-            # Buscar el producto en la base de datos
-            try:
-                producto = Producto.objects.get(id=producto_id)
-                print(f"✅ Producto encontrado: {producto.nombre} - ${producto.precio}")
-            except Producto.DoesNotExist:
-                print(f"❌ ERROR: Producto con ID {producto_id} no existe")
-                return Response(
-                    {'error': f'Producto con ID {producto_id} no existe'}, 
-                    status=status.HTTP_404_NOT_FOUND
-                )
+            print(f"📦 Procesando pago para: {titulo} - ${precio}")
 
-            # Crear la preferencia de pago
+            if not titulo or precio is None:
+                return Response({'error': 'Faltan datos críticos: titulo o precio'}, status=status.HTTP_400_BAD_REQUEST)
+
+            # 2. Convertimos el precio a float para Mercado Pago
+            try:
+                precio_final = float(precio)
+            except (ValueError, TypeError):
+                return Response({'error': 'El formato del precio es inválido'}, status=status.HTTP_400_BAD_REQUEST)
+
+            # 3. Configuramos la preferencia con los datos REALES
             preference_data = {
                 "items": [
                     {
-                        "title": producto.nombre,
+                        "title": titulo,
                         "quantity": 1,
-                        "unit_price": float(producto.precio),
+                        "unit_price": precio_final,
                         "currency_id": "MXN"
                     }
                 ],
@@ -61,37 +53,25 @@ class CrearPagoView(APIView):
                     "failure": "http://localhost:4200/error",
                     "pending": "http://localhost:4200/pendiente"
                 },
+                #"auto_return": "approved",
             }
-            
-            print(f"📤 Enviando a Mercado Pago: {preference_data}")
 
-            # Crear la preferencia en Mercado Pago
+            # 4. Intentamos crear la preferencia en Mercado Pago
             preference_response = sdk.preference().create(preference_data)
             
-            print(f"📥 Respuesta de Mercado Pago: {preference_response}")
-            
-            # Verificar la respuesta
-            if preference_response["status"] == 200 or preference_response["status"] == 201:
-                preference = preference_response["response"]
-                print(f"✅ Preferencia creada exitosamente: {preference['id']}")
-                return Response({'id': preference['id']}, status=status.HTTP_200_OK)
+            # 5. Analizamos la respuesta del SDK
+            if preference_response["status"] in [200, 201]:
+                pref_id = preference_response["response"]['id']
+                print(f"✅ Preferencia creada con éxito: {pref_id}")
+                return Response({'id': pref_id}, status=status.HTTP_200_OK)
             else:
-                print(f"❌ ERROR de Mercado Pago: {preference_response}")
-                return Response(
-                    {
-                        'error': 'Error al crear preferencia en Mercado Pago',
-                        'detalle': preference_response
-                    }, 
-                    status=status.HTTP_400_BAD_REQUEST
-                )
+                # ESTO ES VITAL: Si hay error, imprimimos el detalle real de Mercado Pago
+                print(f"❌ ERROR DETALLADO DE MERCADO PAGO: {preference_response['response']}")
+                return Response({
+                    'error': 'Mercado Pago rechazó la preferencia',
+                    'detalle': preference_response['response']
+                }, status=status.HTTP_400_BAD_REQUEST)
 
         except Exception as e:
-            # Capturar cualquier otro error
-            print(f"❌ ERROR INTERNO: {str(e)}")
-            import traceback
-            traceback.print_exc()
-            
-            return Response(
-                {'error': str(e)}, 
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
-            )
+            print(f"❌ ERROR CRÍTICO EN EL BACKEND: {str(e)}")
+            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
